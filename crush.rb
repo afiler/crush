@@ -27,6 +27,24 @@ class Array
   end
 end
 
+
+class Enumerable::Enumerator
+  def | arg
+    if arg.respond_to? :sym and arg.sym
+      self.map { |x| x.send arg.sym, *arg.args }
+    end
+  end
+  
+  def inspect
+    self.map { |x| x.inspect }
+  end
+
+  def to_s
+    self.map { |x| x.to_s }.join "\n"
+  end
+end
+
+
 class String
   def | arg
     if arg.respond_to? :sym and arg.sym
@@ -54,17 +72,31 @@ class String
 
   def directory?; FileTest.directory? self; end
   def file?; FileTest.file? self; end
-  def chmod(mode); File.chmod(mode, self); end 
-end
+  def chmod(mode); File.chmod(mode, self); end
+  
+  def hexify
+    self.unpack("H*")[0]
+  end
 
-class Finder < Enumerable::Enumerator
-  require 'find'
-  def initialize(path)
-    @path = path
+  def unhexify
+    [self].pack("H*")
   end
-  def each
-    Find.find(@path) { |f| yield f }
+  
+  def clump
+    self.split("\n\n")
   end
+  
+  def col(name)
+    if $col_headers
+      if i = $col_headers.index(name)
+        self.strip.split(/\s+/, $col_headers.length)[i]
+      end
+    else
+      $col_headers = self.strip.split(/\s+/)
+      nil
+    end
+  end
+
 end
 
 class SubshellBase
@@ -132,13 +164,13 @@ class Subshell < SubshellBase
     return nil
   end
   
-  def find(path)
+  def find(path, &block)
     require 'find'
-    #if block_given?
-      Find.find(path)
-    #else
-    #  Finder.new(path)
-    #end
+    if block_given?
+      Find.find(path, &block)
+    else
+      Enumerable::Enumerator.new(lambda { |&blk| Find.find(path) { |x| blk.call x } }, :call)
+    end
   end
 end
 
@@ -185,7 +217,7 @@ def shell
     next if line == ""
     Readline::HISTORY.push line
 
-    commands = line.split /(\s*[;|&]\s*)/
+    #commands = line.split /(\s*[;|&]\s*)/
     #command.each_slice(2) do |i|
     #  cmd = commands[i]
     #  delim = commands[i+1]
@@ -195,8 +227,19 @@ def shell
   end
 end
 
-if ARGV.length > 0
-  exec(ARGV)
-else
-  shell
+if __FILE__ == $0
+  # Allows for this bash magic: alias crush='crush "#" "`history 1`"'
+  #  x='634 cr pwd ### puts "hi" ### ls'; re='###(.+)###'; if [[ $x =~ $re ]]; then echo ${BASH_REMATCH[1]}; fi
+  cmd = if ARGV.length > 1 and ARGV[0] == '#'
+    #ARGV[1].split(/\s+/, 4)[3..-1]
+    ARGV[1].split(/#/, 2)[1]
+  else
+    ARGV
+  end
+
+  if cmd.empty? or cmd.first.empty?
+    shell
+  else
+    exec cmd
+  end
 end
